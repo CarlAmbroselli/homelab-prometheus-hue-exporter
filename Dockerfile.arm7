@@ -1,9 +1,34 @@
-FROM        armhf/alpine:latest
+# Build stage
+FROM golang:1.12 AS builder
 MAINTAINER  Richard Mitchell <hue-exporter@mitch.org.uk>
 
-COPY ./.build/linux-armv7/hue_exporter /bin/hue_exporter
-COPY hue_exporter.example.yml   /etc/hue_exporter/config.yml
+WORKDIR /go/src/github.com/mitchellrj/hue_exporter
 
-EXPOSE      9366
-ENTRYPOINT  [ "/bin/hue_exporter" ]
-CMD         [ "--config.file=/etc/hue_exporter/config.yml" ]
+# Install dep
+RUN curl -fsSL -o /usr/local/bin/dep https://github.com/golang/dep/releases/download/v0.5.4/dep-linux-amd64 && \
+    chmod +x /usr/local/bin/dep
+
+# Copy dependency files first
+COPY Gopkg.toml Gopkg.lock ./
+
+# Install dependencies
+RUN dep ensure -vendor-only
+
+# Copy the rest of the source code
+COPY . .
+
+# Build
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
+    go build -a -tags 'netgo static_build' \
+    -ldflags '-s -w -extldflags "-static"' \
+    -o .build/linux-armv7/hue_exporter
+
+# Final stage
+FROM alpine:latest
+
+COPY --from=builder /go/src/github.com/mitchellrj/hue_exporter/.build/linux-armv7/hue_exporter /bin/hue_exporter
+COPY hue_exporter.example.yml /etc/hue_exporter/config.yml
+
+EXPOSE 9366
+ENTRYPOINT [ "/bin/hue_exporter" ]
+CMD [ "--config.file=/etc/hue_exporter/config.yml" ]
